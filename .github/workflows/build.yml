@@ -1,3 +1,4 @@
+# AnyPS5 automated Windows build verification
 name: Build
 
 on:
