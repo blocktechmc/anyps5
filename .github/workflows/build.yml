@@ -230,3 +230,45 @@ jobs:
           [ -f ctest.log ] || exit 0
           awk '/Test +#[0-9]+: / && $NF == "sec" { for (i = 1; i <= NF; i++) if ($i ~ /^#[0-9]+:$/) name = $(i + 1); t = $(NF - 1) + 0; if (t > max[name]) max[name] = t }
             END { for (name in max) if (max[name] > 30) printf "::warning title=Slow test::%s took %.1f s on %s; tests must finish in 30 s (CONTRIBUTING.md)\n", name, max[name], ENVIRON["RUNNER_OS"] }' ctest.log
+      - name: Stage Windows test package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $packageRoot = Join-Path $env:RUNNER_TEMP 'anyps5-windows-x64'
+          $packageLibs = Join-Path $packageRoot 'libs'
+          $relinker = 'build/core/relinker/relinker.exe'
+          $builtLibs = 'build/core/libs/libs'
+          if (-not (Test-Path -LiteralPath $relinker -PathType Leaf)) { throw "Missing Windows relinker: $relinker" }
+          if (-not (Test-Path -LiteralPath $builtLibs -PathType Container)) { throw "Missing built system libraries: $builtLibs" }
+          $libraries = @(Get-ChildItem -LiteralPath $builtLibs -File -Filter '*.prx')
+          if ($libraries.Count -eq 0) { throw "No patched system .prx libraries found in $builtLibs" }
+          New-Item -ItemType Directory -Force -Path $packageLibs | Out-Null
+          Copy-Item -LiteralPath $relinker -Destination $packageRoot
+          $libraries | Copy-Item -Destination $packageLibs
+          Copy-Item -LiteralPath 'LICENSE' -Destination $packageRoot
+          Copy-Item -LiteralPath 'README.md' -Destination $packageRoot
+          Copy-Item -LiteralPath 'docs/user/USAGE.md' -Destination (Join-Path $packageRoot 'USAGE.md')
+          Copy-Item -LiteralPath 'docs/dev/BUILD.md' -Destination (Join-Path $packageRoot 'BUILD.md')
+          @(
+            'AnyPS5 Windows x64 CI test package'
+            'Source commit: ${{ needs.eligibility.outputs.sha }}'
+            'Source repository: https://github.com/${{ github.repository }}'
+            ''
+            'relinker.exe converts supported input ELF files into host executables.'
+            'Example: .\relinker.exe --windows source\input.elf app.exe'
+            'Refer to USAGE.md for the required input folders and app0/ layout.'
+            'Copy the packaged libs/*.prx beside your converted app.exe in its libs/ folder.'
+            'Additional runtime dependencies and game assets may be required.'
+            ''
+            'This package contains no games, firmware or keys.'
+            'Successful CI compilation and tests do not establish title compatibility.'
+            'Check third-party dependency licensing before redistributing binaries.'
+          ) | Set-Content -LiteralPath (Join-Path $packageRoot 'TESTING.txt') -Encoding utf8
+          Write-Host "Staged $($libraries.Count) compatibility libraries for download"
+      - name: Upload Windows test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: anyps5-windows-x64-${{ github.run_number }}
+          path: ${{ runner.temp }}/anyps5-windows-x64/
+          if-no-files-found: error
+          retention-days: 14
